@@ -11,6 +11,19 @@ weaviate_key = os.getenv("WEAVIATE_KEY")
 embedder = os.getenv("EMBEDDER")
 embedding_model = os.getenv("EMBEDDING_MODEL")
 
+
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:9091/v1")  # or your SSH tunnel port
+LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "ibnzterrell/Meta-Llama-3.3-70B-Instruct-AWQ-INT4")  # or your remote model
+
+
+MYSQL_USER = os.getenv('MYSQL_USER', 'assignments_user')
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'assignments_pass')
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'localhost')
+MYSQL_PORT = os.getenv('MYSQL_PORT', '3306')
+MYSQL_DB = os.getenv('MYSQL_DATABASE', 'assignments_db')
+
+SQLALCHEMY_DATABASE_URL = f"mysql+pymysql://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"
+
 credentials_default = {
     "credentials": {
             "deployment": db_type,

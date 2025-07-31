@@ -5,7 +5,7 @@ from typing import Optional
 import asyncio
 import os
 from dotenv import load_dotenv
-from backend.Agents.vision_agents import *
+from Agents.vision_agents import *
 import fitz
 from io import BytesIO
 from docx import Document
@@ -15,35 +15,81 @@ from typing import Dict, Tuple
 from typing import List
 from fastapi import UploadFile
 import re
-from backend.InferenceEngine.inference_engines import *
+from InferenceEngine.inference_engines import *
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from src.configs import SQLALCHEMY_DATABASE_URL
+from src.data_types_class import Base
+
 # Load environment variables from .env file
 load_dotenv()
 
-# Access the environment variables
-ollama_url = os.getenv("OLLAMA_URL")
-ollama_model = os.getenv("OLLAMA_MODEL_FOR_ANALYSIS")
-verba_url = os.getenv("VERBA_URL")
+import os
+import json
+import httpx
 
-print(ollama_url)
+# Example usage values (can still be loaded from env if you want)
+default_base_url = "http://localhost:11434"
+default_model = "gemma3:12b"
 
-# Define the OllamaLLM class with flexibility to input system and user prompts
-class OllamaLLM(LLM):
-    def __init__(self, system_prompt: str):
-        self.system_prompt = system_prompt  # Set system prompt during initialization
+print(f"Default LLM URL: {default_base_url}")
+print(f"Default LLM Model: {default_model}")
+
+class GenericLLM:
+    def __init__(self, base_url: str, model_name: str, system_prompt: str):
+        self.base_url = base_url.rstrip("/")
+        self.model_name = model_name
+        self.system_prompt = system_prompt
 
     async def _invoke_llm(self, user_prompt: str) -> str:
-        # Use the global ollama_url and the system prompt from initialization
-        return await invoke_llm(self.system_prompt, user_prompt)
+        """Send a prompt to the LLM server and get a response."""
+        payload = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "stream": False
+        }
 
-    def _call(self, prompt: str, stop: Optional[list[str]] = None) -> str:
-        # Call the asynchronous invoke_llm in a synchronous manner
-        response = asyncio.run(self._invoke_llm(prompt))
-        return response["answer"]
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                url = f"{self.base_url}/chat/completions"
+                print(f"Sending request to: {url}")
+                print(f"Payload: {json.dumps(payload, indent=2)}")
 
-    @property
-    def _llm_type(self) -> str:
-        return "ollama_llm"
+                response = await client.post(url, json=payload)
+                print(f"Response status: {response.status_code}")
+                print(f"Response headers: {dict(response.headers)}")
 
+                if response.status_code != 200:
+                    print(f"Response text: {response.text}")
+
+                response.raise_for_status()
+                result = response.json()
+                print(f"Response JSON: {json.dumps(result, indent=2)}")
+                return result["choices"][0]["message"]["content"]
+
+        except httpx.HTTPStatusError as e:
+            print(f"HTTP Status Error: {e}")
+            print(f"Response content: {e.response.text}")
+            raise Exception(f"HTTP {e.response.status_code}: {e.response.text}")
+        except httpx.RequestError as e:
+            print(f"Request Error: {e}")
+            raise Exception(f"Request failed: {str(e)}")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            raise
+
+
+async def invoke_llm(system_prompt: str, user_prompt: str, base_url: str = default_base_url, model_name: str = default_model) -> dict:
+    llm = GenericLLM(base_url, model_name, system_prompt)
+    try:
+        answer = await llm._invoke_llm(user_prompt)
+        return {"answer": answer}
+    except Exception as e:
+        print(f"Error in invoke_llm: {e}")
+        raise
 
 def resize_image(image_bytes: bytes, max_size: int = 800, min_size: int = 70) -> bytes:
     """
@@ -360,3 +406,9 @@ async def context_relevance_filter(query: str, context: str) -> str:
     if is_context_relevant.lower() == 'no':
         return " "  # Returns an empty coroutine
     return context
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=True, future=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
